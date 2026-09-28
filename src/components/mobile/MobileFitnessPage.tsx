@@ -68,9 +68,14 @@ export interface MobileFitnessData {
   today?: string;                       // YYYY-MM-DD (오늘 마커용)
   // 주간 TSS
   weeklyTSS: number[];   // 오래된 → 최신 (최근 4주)
-  thisWeekTSS: number;
-  avgWeekTSS: number;
-  restDays: number;
+  thisWeekTSS: number | null;
+  avgWeekTSS: number | null;
+  restDays: number | null;
+  weeklyLoadPartial?: boolean;
+  loadUnknownCount?: number;
+  thisWeekUnknownCount?: number;
+  hasKnownWeeklyLoad?: boolean;
+  hasKnownThisWeekLoad?: boolean;
   // 임계값 (종목별)
   threshold: MobileFitnessThreshold | null;
   // bike 핵심 상태/역량 표시용 프로필 값.
@@ -454,7 +459,7 @@ function SectionCard({ children, title, sub, accentColor, ariaLabel, compact = f
   // (max-w mx-auto px-4 = 좌우 16px) 인셋을 음수 마진(-16)으로 상쇄해 좌우 끝까지 채우고,
   // 좌우 border·radius 는 제거하고 상하 구분선만 둔다. 콘텐츠는 좌우 16px padding 으로 가독성 유지.
   return (
-    <div role={ariaLabel ? "region" : undefined} aria-label={ariaLabel} style={{
+    <div className="mobile-fitness-section" role={ariaLabel ? "region" : undefined} aria-label={ariaLabel} style={{
       margin: compact ? "0 -16px var(--space-2)" : "0 -16px 12px",
       background: "var(--bg-1)",
       borderTop: accentColor ? `var(--space-0-5) solid ${accentColor}` : "1px solid var(--line-soft)",
@@ -565,6 +570,7 @@ export default function MobileFitnessPage({
   sectionState?: MobileFitnessSectionState;
 }) {
   const { t } = useTranslation("dashboard");
+  const { t: trainingT } = useTranslation("training");
   const [tab, setTab] = useState<"overview" | "analysis">("overview");
   useEffect(() => {
     setTab("overview");
@@ -620,7 +626,7 @@ export default function MobileFitnessPage({
 
   return (
     <div className={embedded ? "mobile-fitness-page mobile-fitness-page--embedded" : "mobile-fitness-page"}>
-      {!embedded && <h1 className="sr-only">{t("mobileFitness.title")}</h1>}
+      <h1 className={embedded ? "orider-embedded-page-title" : "sr-only"}>{t("mobileFitness.title")}</h1>
 
       <div className="mobile-fitness-toolbar">
         <div className="mobile-fitness-toolbar__sports">
@@ -713,14 +719,10 @@ export default function MobileFitnessPage({
             />
           )}
 
-          {data.discipline !== "tri" && (
+
+          {!embedded && data.discipline !== "tri" && (
             <div style={{ marginBottom: "var(--space-3)" }}>
-              <SportPerformanceCard
-                discipline={data.discipline}
-                cycling={data.cyclingAbility}
-                run={data.runEvidence}
-                swim={data.swimEvidence}
-              />
+              <SportPerformanceCard discipline={data.discipline} cycling={data.cyclingAbility} run={data.runEvidence} swim={data.swimEvidence} />
             </div>
           )}
 
@@ -737,10 +739,19 @@ export default function MobileFitnessPage({
           )}
 
           {/* 주간 TSS */}
-          {sectionState.trend === "ready" && data.weeklyTSS.length > 0 && (
-            <SectionCard title={t("mobileFitness.weeklyLoadTitle")} sub={t("mobileFitness.weeklyLoadSub", { thisWeek: data.thisWeekTSS, avg: data.avgWeekTSS, restDays: data.restDays })}>
-              <WeeklyTssBars values={data.weeklyTSS} color={weeklyLoadColor} t={t} />
+          {sectionState.trend === "ready" && (data.weeklyTSS.length > 0 || data.weeklyLoadPartial) && (
+            <SectionCard title={t("mobileFitness.weeklyLoadTitle")} sub={t("mobileFitness.weeklyLoadSub", { thisWeek: data.thisWeekUnknownCount && !data.hasKnownThisWeekLoad ? "–" : data.thisWeekTSS ?? "–", avg: data.loadUnknownCount && !data.hasKnownWeeklyLoad ? "–" : data.avgWeekTSS ?? "–", restDays: data.restDays ?? "–" })}>
+              {(!data.loadUnknownCount || data.hasKnownWeeklyLoad) && <WeeklyTssBars values={data.weeklyTSS} color={weeklyLoadColor} t={t} />}
+              {data.weeklyLoadPartial && <Text variant="caption">{t("fitness:history.partial")}</Text>}
+              {!!data.loadUnknownCount && <Text variant="caption">{trainingT("log.loadPartial", { count: data.loadUnknownCount })}</Text>}
             </SectionCard>
+          )}
+
+          {embedded && data.discipline !== "tri" && (
+            <details className="mobile-fitness-provenance">
+              <summary>{t(`mobileFitness.sport.${data.discipline}.title`)}</summary>
+              <SportPerformanceCard discipline={data.discipline} cycling={data.cyclingAbility} run={data.runEvidence} swim={data.swimEvidence} />
+            </details>
           )}
 
         </div>
@@ -775,7 +786,7 @@ export default function MobileFitnessPage({
             <SectionCard
               title={isBike ? t("mobileFitness.zonePowerTitle") : t("mobileFitness.zoneHrTitle")}
               sub={
-                data.zoneSource === "power" ? t("mobileFitness.zoneSourcePower") :
+                data.zoneSource === "power" ? t("mobileFitness.zoneSourcePowerHistorical") :
                 data.zoneSource === "hr" ? (isBike ? t("mobileFitness.zoneSourceHrBike") : t("mobileFitness.zoneSourceHrRun")) :
                 t("mobileFitness.zoneSourceNone")
               }>
