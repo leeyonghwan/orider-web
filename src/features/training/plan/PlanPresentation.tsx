@@ -629,12 +629,14 @@ export default function PlanPresentation({
             <DisciplineTabs />
           </div>
         )}
-        <div style={{ padding: "24px 0" }}>
+        {embedded && <h1 className="orider-embedded-page-title">{t("page.embeddedTitle")}</h1>}
+        <div style={{ padding: "var(--space-6) 0" }}>
           <EmptyState
+            compact={embedded}
             icon={sportIcon}
             title={t('page.planEmpty', { sportLabel })}
-            description={t('page.planEmptyDesc', { sportLabel })}
-            actions={embedded ? undefined : [
+            description={t(embedded ? 'page.planEmptyEmbeddedDesc' : 'page.planEmptyDesc', { sportLabel })}
+            actions={embedded ? [{ label: tCommon("button.retry"), variant: "primary", onClick: () => retryLoad() }] : [
               { label: t('page.planEmptyAction', { sportLabel }), variant: "primary", href: `/goal-setup?sport=${discipline}` },
             ]}
           />
@@ -653,12 +655,14 @@ export default function PlanPresentation({
             <DisciplineTabs />
           </div>
         )}
-        <div style={{ padding: "24px 0" }}>
+        {embedded && <h1 className="orider-embedded-page-title">{t("page.embeddedTitle")}</h1>}
+        <div style={{ padding: "var(--space-6) 0" }}>
           <EmptyState
+            compact={embedded}
             icon={sportIcon}
             title={t('page.planEmpty', { sportLabel })}
-            description={t('page.planEmptyDesc', { sportLabel })}
-            actions={embedded ? undefined : [
+            description={t(embedded ? 'page.planEmptyEmbeddedDesc' : 'page.planEmptyDesc', { sportLabel })}
+            actions={embedded ? [{ label: tCommon("button.retry"), variant: "primary", onClick: () => retryLoad() }] : [
               { label: t('page.planEmptyAction', { sportLabel }), variant: "primary", href: `/goal-setup?sport=${discipline}` },
             ]}
           />
