@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, useState, useMemo } from "react";
+import { Fragment, lazy, Suspense, useState, useMemo, type ReactNode } from "react";
 import { ChevronDown, SlidersHorizontal } from "lucide-react";
 import { useActivityAuthor } from "../../hooks/useActivityAuthor";
 import { useTranslation } from "react-i18next";
@@ -18,6 +18,9 @@ import type { ConsistencyStreakSummary } from "../../utils/consistencyStreak";
 import type { ActivityFeedScope } from "../../hooks/useActivities";
 import ActivityRouteThumbnail from "../activity/ActivityRouteThumbnail";
 import type { DashboardDatePreset, DashboardSportFilter } from "../../hooks/useDashboardPreferences";
+import { useLocale } from "../../contexts/LocaleContext";
+import { formatDistance, formatElev, formatPace, formatSpeed } from "../../utils/units";
+import { isImplausibleActivityHeartRate } from "../../utils/activitySanity";
 import "./MobileFeedPage.css";
 
 const ConsistencyStreakCard = lazy(() => import("../training/ConsistencyStreakCard"));
@@ -56,6 +59,7 @@ interface MobileFeedPageProps {
   onSportFilterChange?: (sportFilter: SportFilter) => void;
   datePreset?: DashboardDatePreset;
   onDatePresetChange?: (datePreset: DashboardDatePreset) => void;
+  runningJourney?: ReactNode;
 }
 
 function SportSummaryFilter({
@@ -161,15 +165,17 @@ function MobileRouteThumbnail({ activity, priority = false }: { activity: Activi
 }
 
 /** 시안과 일치하는 컴팩트 모바일 활동 카드 */
-function CompactActivityCard({ activity, priority = false }: { activity: Activity; priority?: boolean }) {
+export function CompactActivityCard({ activity, priority = false }: { activity: Activity; priority?: boolean }) {
   const { t } = useTranslation("dashboard");
   const s = activity.summary;
+  const { units } = useLocale();
+  const { t: tActivity } = useTranslation("activity");
 
-  const distKm = (s.distance / 1000).toFixed(1);
+  const distance = formatDistance(s.distance, units);
   // #236: 정지 큰 활동은 이동시간 우선 (상세·데스크톱 카드와 동일 정책 — resolveDuration 공유).
   const sd = resolveDuration({ ...s, startTime: activity.startTime, endTime: activity.endTime });
   const dur = formatDur(sd.displayMs);
-  const elev = Math.round(s.elevationGain).toLocaleString();
+  const elev = formatElev(s.elevationGain, units);
   // 평균 속도도 시간 기준과 일치 — 전환 시 거리/이동시간, 아니면 거리/경과 (#236 후속).
   const elapsedSpd = s.distance > 0 && s.ridingTimeMillis > 0
     ? (s.distance / 1000) / (s.ridingTimeMillis / 3600000)
@@ -179,7 +185,10 @@ function CompactActivityCard({ activity, priority = false }: { activity: Activit
   const discipline = getDiscipline(activity.type);
   // 비현실 속도(GPS noise/오등록) 가드 — 광고 유입자 첫인상 신뢰성 보호.
   const spdImplausible = isImplausibleAvgSpeed(spdNum, discipline ?? undefined);
-  const spd = spdNum > 0 ? (spdImplausible ? "—" : spdNum.toFixed(1)) : "0";
+  const spd = spdNum > 0 && !spdImplausible ? formatSpeed(spdNum / 3.6, units, "bike") : "—";
+  const pace = spdNum > 0 && !spdImplausible ? formatPace(3600 / spdNum, units) : "—";
+  const heartRate = s.averageHeartRate;
+  const hasHr = heartRate != null && heartRate > 0 && !isImplausibleActivityHeartRate(heartRate);
   const showDataWarning = isImplausibleActivity({
     distanceM: s.distance,
     durationMs: s.ridingTimeMillis,
@@ -247,23 +256,35 @@ function CompactActivityCard({ activity, priority = false }: { activity: Activit
       <MobileRouteThumbnail activity={activity} priority={priority} />
 
       {/* 4-col stats */}
-      <div className="flex">
-        {[
-          { v: distKm, u: "km", l: t("mobileFeed.statDistance") },
+      <div className="flex" data-testid={discipline === "run" ? "run-card-primary" : undefined}>
+        {(discipline === "run" ? [
+          { v: distance, u: "", l: t("mobileFeed.statDistance") },
+          { v: pace, u: "", l: tActivity("stat.avgPace") },
           { v: dur, u: "", l: t("mobileFeed.statTime") },
-          { v: elev, u: "m", l: t("mobileFeed.statElev") },
-          { v: spd, u: "km/h", l: t("mobileFeed.statSpeed") },
-        ].map((stat, i) => (
+        ] : [
+          { v: distance, u: "", l: t("mobileFeed.statDistance") },
+          { v: dur, u: "", l: t("mobileFeed.statTime") },
+          { v: elev, u: "", l: t("mobileFeed.statElev") },
+          { v: spd, u: "", l: t("mobileFeed.statSpeed") },
+        ]).map((stat, i) => (
           <div key={stat.l} style={{ flex: 1, borderLeft: i > 0 ? "1px solid var(--line-soft)" : "none", paddingLeft: i > 0 ? 12 : 0 }}>
             {/* 라벨 위 / 값 아래 — ActivityCard 와 동일 세로 스택 (가독성) */}
             <div style={{ fontSize: "var(--fs-xs)", color: "var(--ink-3)", marginBottom: "var(--space-0-5)" }}>{stat.l}</div>
             <div>
-              <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--fs-sm)", fontWeight: 600, color: "var(--ink-0)", letterSpacing: "-0.02em", lineHeight: 1 }}>{stat.v}</span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: discipline === "run" && i === 1 ? "var(--fs-lg)" : "var(--fs-sm)", fontWeight: 600, color: "var(--ink-0)", letterSpacing: "-0.02em", lineHeight: 1 }}>{stat.v}</span>
               {stat.u && <span style={{ fontFamily: "var(--font-mono)", fontSize: "var(--fs-xs)", color: "var(--ink-4)" }}> {stat.u}</span>}
             </div>
           </div>
         ))}
       </div>
+
+      {discipline === "run" && (
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[length:var(--fs-xs)]" style={{ color: "var(--ink-3)" }} data-testid="run-card-secondary">
+          {hasHr && <span>{tActivity("stat.avgHrShort")} · {Math.round(heartRate)} bpm</span>}
+          <span>{t("mobileFeed.statElev")} · {elev}</span>
+          {(s.averagePower ?? activity.avgPower ?? 0) > 0 && <span>{tActivity("stat.runningPower")} · {Math.round(s.averagePower ?? activity.avgPower ?? 0)} W</span>}
+        </div>
+      )}
 
       {/* 스트라바형 소셜 푸터 — 좋아요(아바타 스택)+댓글. 카드 패딩(16) 음수마진으로 상쇄해
           전폭 상단 구분선, 내부는 footer 자체 px-4 로 콘텐츠와 정렬 (지도 썸네일과 동일 기법). */}
@@ -281,6 +302,7 @@ export default function MobileFeedPage({
   onSportFilterChange,
   datePreset: controlledDatePreset,
   onDatePresetChange,
+  runningJourney,
 }: MobileFeedPageProps) {
   const { t } = useTranslation("dashboard");
   const { user } = useAuth();
@@ -483,6 +505,10 @@ export default function MobileFeedPage({
           </label>
         </div>}
       </div>
+
+      {user && effectiveFeedScope === "self" && sportFilter === "run" && runningJourney && (
+        <div data-testid="mobile-owner-running-journey" className="space-y-3">{runningJourney}</div>
+      )}
 
       {/* 활동 피드 */}
       {loading && (
