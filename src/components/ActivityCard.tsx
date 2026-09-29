@@ -4,7 +4,7 @@ import { LocalizedLink as Link } from "./LocalizedLink";
 import { logClientError } from "../services/errorLogger";
 import { useLocale } from "../contexts/LocaleContext";
 import { useStrava } from "../hooks/useStrava";
-import { formatDistance, formatSpeed, formatElev } from "../utils/units";
+import { formatDistance, formatSpeed, formatElev, formatPace } from "../utils/units";
 import { resolveDuration, resolveAvgSpeedKph } from "../utils/activityTime";
 import { getStravaActivityId } from "../utils/stravaActivity";
 import type { Activity } from "@shared/types";
@@ -174,7 +174,7 @@ export function buildTopAchievementsFromStreams(streams: unknown): ActivityCardA
  * Stat block — 라벨 위 / 값 아래 vertical block. 모바일·데스크톱 동일 (가독성 우선,
  * 모바일웹 스타일). 라벨은 ink-2 소형, 값은 ink-0 semibold.
  */
-function StatBlock({ label, value, title }: { label: string; value: string; title?: string }) {
+function StatBlock({ label, value, title, prominent = false }: { label: string; value: string; title?: string; prominent?: boolean }) {
   // title 이 있으면 값 위로 hover 시 네이티브 툴팁(설명). 데이터 이상 시 원본값 노출에 사용.
   return (
     <div className="flex flex-col items-start">
@@ -185,7 +185,7 @@ function StatBlock({ label, value, title }: { label: string; value: string; titl
         {label}
       </span>
       <span
-        className="font-semibold text-[length:var(--fs-sm)]"
+        className={prominent ? "font-bold text-[length:var(--fs-lg)]" : "font-semibold text-[length:var(--fs-sm)]"}
         style={{ color: 'var(--ink-0)' }}
         title={title}
       >
@@ -233,6 +233,7 @@ export default function ActivityCard({
   const { t: tCommon } = useTranslation("common");
   const timeAgo = useTimeAgo();
   const s = activity.summary ?? EMPTY_ACTIVITY_SUMMARY;
+  const isRun = getDiscipline(activity.type) === "run";
   // 작성자는 프로필(users_public)이 정본이다 — 활동 문서의 nickname 은 업로드 시점 복제본이라
   // 앱 업로드분엔 아예 없고(#2444) 개명 후엔 옛 이름으로 남는다.
   const author = useActivityAuthor(activity);
@@ -375,6 +376,23 @@ export default function ActivityCard({
         {/* Middle: Stats — 3컬럼 stat-block (라벨 위 / 값 아래), 모바일·데스크톱 동일.
          *  값이 라벨 아래로 내려가 가독성 향상 (모바일웹 스타일). 6개 stat → 3열 2행. */}
         <div className="min-w-0 md:pl-4 pt-3 md:pt-0 border-t md:border-t-0 md:border-l" style={{ borderColor: 'var(--line-soft)' }}>
+          {isRun ? (() => {
+            const duration = resolveDuration({ ...s, startTime: activity.startTime, endTime: activity.endTime });
+            const speed = resolveAvgSpeedKph(s.distance, duration, s.averageSpeed);
+            const power = s.averagePower ?? activity.avgPower;
+            return <>
+              <div className="grid grid-cols-3 gap-3" data-testid="run-card-primary">
+                <StatBlock label={t("stat.distance")} value={formatDistance(s.distance, units)} />
+                <StatBlock label={t("stat.avgPace")} value={speed > 0 && !isImplausibleAvgSpeed(speed, "run") ? formatPace(3600 / speed, units) : "—"} prominent />
+                <StatBlock label={t("stat.time")} value={formatDuration(duration.displayMs)} />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[length:var(--fs-xs)]" style={{ color: 'var(--ink-2)' }} data-testid="run-card-secondary">
+                {s.averageHeartRate != null && s.averageHeartRate > 0 && !isImplausibleActivityHeartRate(s.averageHeartRate) && <span>{t("stat.avgHrShort")} · {s.averageHeartRate} bpm</span>}
+                <span>{t("stat.elevShort")} · {formatElev(s.elevationGain, units)}</span>
+                {power != null && power > 0 && <span>{t("stat.runningPower")} · {Math.round(power)} W</span>}
+              </div>
+            </>;
+          })() : (
           <div
             className="grid gap-x-3 gap-y-2 text-[length:var(--fs-sm)] grid-cols-3"
           >
@@ -400,8 +418,8 @@ export default function ActivityCard({
               const implausible = isImplausibleAvgSpeed(avgKph, getDiscipline(activity.type) ?? undefined);
               return (
                 <StatBlock
-                  label={t("stat.avgSpeed")}
-                  value={implausible ? "—" : formatSpeed(avgKph / 3.6, units, 'bike')}
+                  label={t(isRun ? "stat.avgPace" : "stat.avgSpeed")}
+                  value={implausible || avgKph <= 0 ? "—" : isRun ? formatPace(3600 / avgKph, units) : formatSpeed(avgKph / 3.6, units, 'bike')}
                   title={implausible
                     ? t("stat.dataWarningRaw", { value: avgKph.toFixed(1) })
                     : (sd.usingMoving ? t("stat.movingAvgTotal", { total: s.averageSpeed.toFixed(1) }) : undefined)}
@@ -410,18 +428,19 @@ export default function ActivityCard({
             })()}
             {/* 센서 미연결 (0 W / 0 bpm) 케이스는 stat 숨김 — 광고 유입자에게
              *  "데이터 없음" 인상보다 stat 카드가 일관성 있게 노출되는 게 낫다. */}
-            {(() => {
-              const pw = s.averagePower ?? activity.avgPower;
-              return pw != null && pw > 0 ? (
-                <StatBlock label={t("stat.powerShort")} value={`${Math.round(pw)} W`} />
-              ) : null;
-            })()}
             {s.averageHeartRate != null &&
               s.averageHeartRate > 0 &&
               !isImplausibleActivityHeartRate(s.averageHeartRate) && (
               <StatBlock label={t("stat.avgHrShort")} value={`${s.averageHeartRate} bpm`} />
-            )}
+            )}            {(() => {
+              const pw = s.averagePower ?? activity.avgPower;
+              return pw != null && pw > 0 ? (
+                <StatBlock label={t(isRun ? "stat.runningPower" : "stat.powerShort")} value={`${Math.round(pw)} W`} />
+              ) : null;
+            })()}
+
           </div>
+          )}
         </div>
 
         {/* Right: Segment Achievements — 모바일 상단 구분선, 데스크톱 좌측 구분선 */}
@@ -446,7 +465,7 @@ export default function ActivityCard({
             </div>
           ) : (
             <div className="text-[length:var(--fs-xs)] text-center" style={{ color: 'var(--ink-4)' }}>
-              {t("card.noAchievements")}
+              {isRun ? <Link to={`/activity/${activity.id}`}>{t("card.runSplitsLink")}</Link> : t("card.noAchievements")}
             </div>
           )}
         </div>
